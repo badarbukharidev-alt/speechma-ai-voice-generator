@@ -1,0 +1,23 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Windows binaries (Pure Python solver is used by default)
+tesseract/
+*.exe
+*.dll
+
+# Outputs
+outputs/*.mp3
+!outputs/.gitkeep
+
+# Environments
+.env
+venv/
+env/
+.venv/
+
+# IDEs
+.vscode/
+.idea/
