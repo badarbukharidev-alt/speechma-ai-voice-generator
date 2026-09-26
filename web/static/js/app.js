@@ -498,7 +498,7 @@ function updateTextMetrics() {
     const timeText = readMins > 0 ? `~${readMins}m ${remSecs}s read` : `~${remSecs}s read`;
 
     if (el.charCount) {
-        el.charCount.textContent = `${chars.toLocaleString()} characters • Unlimited`;
+        el.charCount.textContent = `${chars.toLocaleString()} characters (Unlimited)`;
     }
     if (el.wordCount) {
         el.wordCount.textContent = `${words.toLocaleString()} words`;
@@ -512,7 +512,7 @@ function updateTextMetrics() {
         if (chars > 1800) {
             const chunks = Math.ceil(chars / 1800);
             el.batchBadge.style.display = 'inline-flex';
-            el.batchBadge.textContent = `⚡ Fast Parallel Mode (~${chunks} Chunks)`;
+            el.batchBadge.textContent = `Turbo Parallel (~${chunks})`;
         } else {
             el.batchBadge.style.display = 'none';
         }
@@ -757,7 +757,7 @@ async function generateSpeech() {
     } finally {
         state.isGenerating = false;
         if (el.generateBtn) el.generateBtn.disabled = false;
-        if (el.generateText) el.generateText.textContent = "Generate Audio";
+        if (el.generateText) el.generateText.textContent = "Generate Speech";
     }
 }
 
