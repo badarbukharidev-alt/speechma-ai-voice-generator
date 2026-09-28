@@ -28,6 +28,7 @@ from core.config import (
     TESSERACT_EXE,
     TTS_URL,
 )
+from core.proxy import proxy_manager
 from core.solver import solve_captcha_pure_python
 from core.voices import resolve_voice_id
 
@@ -57,10 +58,41 @@ class TTSError(SpeechmaError):
 class SpeechmaTTS:
     """Core Speechma TTS client with captcha handling and audio generation."""
 
-    def __init__(self, timeout: int = 120):
-        self.session = requests.Session()
-        self.session.headers.update(REQUEST_HEADERS)
+    def __init__(self, timeout: int = 120, use_proxies: bool = False, custom_proxy: Optional[str] = None):
         self.timeout = timeout
+        self.use_proxies = use_proxies or bool(custom_proxy)
+        self.custom_proxy = custom_proxy
+        self.current_proxy = None
+        self._init_session()
+
+    def _init_session(self, rotate_proxy: bool = False):
+        """Initializes or resets requests.Session with rotated IP headers and optional proxies."""
+        self.session = requests.Session()
+        headers = dict(REQUEST_HEADERS)
+        # Rotate client IP headers (prevents Cloudflare/PHP single-IP rate-limiting)
+        rand_ip = proxy_manager.generate_random_ip()
+        headers.update({
+            "X-Forwarded-For": rand_ip,
+            "Client-IP": rand_ip,
+            "CF-Connecting-IP": rand_ip,
+            "X-Real-IP": rand_ip,
+        })
+        self.session.headers.update(headers)
+
+        if self.custom_proxy:
+            p_url = self.custom_proxy if "://" in self.custom_proxy else f"http://{self.custom_proxy}"
+            self.current_proxy = {"http": p_url, "https": p_url}
+            self.session.proxies = self.current_proxy
+        elif self.use_proxies:
+            self.current_proxy = proxy_manager.get_random_proxy()
+            if self.current_proxy:
+                self.session.proxies = self.current_proxy
+
+    def reset_session(self, rotate_proxy: bool = True):
+        """Discards cookies/session and establishes a fresh connection."""
+        if self.current_proxy and rotate_proxy:
+            proxy_manager.mark_failed(self.current_proxy)
+        self._init_session(rotate_proxy=rotate_proxy)
 
     def _generate_rid(self) -> str:
         """Generates a random request id matching the format expected by Speechma."""
@@ -76,11 +108,13 @@ class SpeechmaTTS:
             resp = self.session.get(
                 CAPTCHA_URL,
                 params={"t": str(int(time.time() * 1000)), "r": rand_part},
-                timeout=30,
+                timeout=25,
             )
             resp.raise_for_status()
             return resp.content, rid
         except Exception as e:
+            # If request failed, reset session and retry
+            self.reset_session(rotate_proxy=True)
             raise CaptchaError(f"Failed to fetch captcha from Speechma: {e}") from e
 
     def verify_captcha(self, code: str, request_id: str) -> bool:
@@ -159,6 +193,8 @@ class SpeechmaTTS:
             )
             resp.raise_for_status()
         except requests.exceptions.RequestException as e:
+            # If server blocked IP (403, 429) or token expired, reset session immediately
+            self.reset_session(rotate_proxy=True)
             raise TTSError(f"TTS network request failed: {e}") from e
 
         content_type = resp.headers.get("content-type", "").lower()
@@ -166,6 +202,7 @@ class SpeechmaTTS:
             return resp.content
 
         # Handle non-audio response (error JSON or HTML)
+        self.reset_session(rotate_proxy=True)
         try:
             err_json = resp.json()
             raise TTSError(f"Speechma API returned error: {err_json}")
@@ -180,23 +217,14 @@ class SpeechmaTTS:
         voice: str = DEFAULT_VOICE,
         pitch: int = 0,
         rate: int = 0,
-        max_retries: int = 6,
+        max_retries: int = 8,
         status_callback: Optional[Callable[[dict], None]] = None,
         manual_code: Optional[str] = None,
         request_id: Optional[str] = None,
     ) -> bytes:
         """
-        Generates TTS audio for text <= 2000 characters with automated captcha solving.
-        
-        Args:
-            text: Text to speak (max 2000 chars)
-            voice: Voice ID (e.g. 'voice-107')
-            pitch: Pitch offset (-10 to 10)
-            rate: Speech rate offset (-10 to 10)
-            max_retries: Number of captcha retry attempts
-            status_callback: Optional callback receiving dict with progress/status
-            manual_code: Optional manual captcha code if user provided one
-            request_id: Optional request_id corresponding to manual_code
+        Generates TTS audio for text <= 2000 characters with automated captcha solving,
+        auto-healing sessions, and IP rotation on rate limits.
         """
         voice = resolve_voice_id(voice)
 
@@ -210,7 +238,7 @@ class SpeechmaTTS:
                 status_callback({"step": "synthesizing", "voice": voice})
             return self.request_tts(text, voice=voice, pitch=pitch, rate=rate)
 
-        # Automatic OCR flow
+        # Automatic OCR flow with session recovery
         last_error = None
         for attempt in range(1, max_retries + 1):
             if status_callback:
@@ -225,7 +253,9 @@ class SpeechmaTTS:
                 img_bytes, rid = self.fetch_captcha()
             except Exception as e:
                 last_error = e
-                time.sleep(0.5)
+                # Auto-healing: rotate session and IP
+                self.reset_session(rotate_proxy=True)
+                time.sleep(0.5 + random.uniform(0.1, 0.4))
                 continue
 
             try:
@@ -242,7 +272,7 @@ class SpeechmaTTS:
                         "code": code,
                         "message": f"OCR detected invalid length '{code}', retrying...",
                     })
-                time.sleep(0.6)
+                time.sleep(0.4)
                 continue
 
             if status_callback:
@@ -261,7 +291,10 @@ class SpeechmaTTS:
                         "code": code,
                         "message": f"Code '{code}' was rejected, trying new captcha...",
                     })
-                time.sleep(0.6)
+                # If rejected 2 times consecutively, cycle session
+                if attempt % 2 == 0:
+                    self.reset_session(rotate_proxy=False)
+                time.sleep(0.4)
                 continue
 
             # Captcha verified! Now generate speech
@@ -273,16 +306,23 @@ class SpeechmaTTS:
                     "message": "Captcha verified successfully! Synthesizing audio...",
                 })
 
-            audio_data = self.request_tts(text, voice=voice, pitch=pitch, rate=rate)
-            if status_callback:
-                status_callback({
-                    "step": "completed",
-                    "bytes": len(audio_data),
-                    "message": "Speech generated successfully.",
-                })
-            return audio_data
+            try:
+                audio_data = self.request_tts(text, voice=voice, pitch=pitch, rate=rate)
+                if status_callback:
+                    status_callback({
+                        "step": "completed",
+                        "bytes": len(audio_data),
+                        "message": "Speech generated successfully.",
+                    })
+                return audio_data
+            except TTSError as e:
+                last_error = e
+                # Reset session on failure so next attempt uses fresh state
+                self.reset_session(rotate_proxy=True)
+                time.sleep(0.8)
+                continue
 
-        raise CaptchaError(f"All {max_retries} captcha attempts failed. Last error: {last_error}")
+        raise CaptchaError(f"All {max_retries} attempts failed. Last error: {last_error}")
 
 
 def split_text_smart(text: str, limit: int = MAX_CHARS_PER_REQUEST) -> List[str]:

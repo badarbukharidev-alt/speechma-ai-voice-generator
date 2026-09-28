@@ -30,6 +30,7 @@ from core import (
     get_genders,
     get_languages,
     get_voice_by_id,
+    proxy_manager,
     resolve_voice_id,
     split_text_smart,
 )
@@ -69,12 +70,18 @@ class CaptchaVerifyRequest(BaseModel):
 
 @app.get("/api/status")
 def get_system_status():
-    """Returns engine health, solver status, and voice count."""
+    """Returns engine health, solver status, proxy pool, and voice count."""
     voices = get_all_voices()
     return {
         "status": "online",
         "solver": "pure_python_ultra_fast",
         "vps_required": False,
+        "proxy_pool": {
+            "enabled": True,
+            "anti_ban_headers": True,
+            "total_proxies": len(proxy_manager.proxies),
+            "failed_proxies": len(proxy_manager.failed_proxies),
+        },
         "tesseract": {
             "available": HAS_TESSERACT,
             "version": TESSERACT_VERSION,

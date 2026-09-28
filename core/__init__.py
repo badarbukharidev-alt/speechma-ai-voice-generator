@@ -4,6 +4,7 @@ Speechma TTS Core Package
 
 from core.config import HAS_TESSERACT, TESSERACT_EXE, TESSERACT_VERSION, OUTPUTS_DIR
 from core.engine import SpeechmaTTS, SpeechmaError, CaptchaError, TTSError, split_text_smart, generate_batch
+from core.proxy import proxy_manager, ProxyManager
 from core.voices import (
     load_voices,
     get_all_voices,

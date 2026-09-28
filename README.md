@@ -38,6 +38,7 @@ Most free Text-to-Speech services enforce strict limits: 2,000 characters, slow 
 | Feature | Description |
 | :--- | :--- |
 | ⚡ **0.4ms Native OCR** | Reverse-engineered bitwise Hamming distance algorithm in pure Python Pillow. Zero external binaries or models. |
+| 🛡️ **Anti-Ban & IP Rotation** | Rotates client IP headers, auto-heals expired PHP sessions, and supports free public rotating proxy pools. |
 | 🚀 **Parallel Turbo Synthesis** | Synthesizes large multi-thousand-word texts concurrently with multi-threading, delivering audio up to 5x faster. |
 | 🎨 **Apple Cupertino UI** | Frosted glass backdrop blur, custom dropdowns with search, waveform audio scrubbers, and crisp SVG vector icons (no emojis). |
 | 🎙️ **580+ AI Voices** | Filter by language, country, and gender, with instant single-click preview auditions. |
@@ -53,7 +54,8 @@ Most free Text-to-Speech services enforce strict limits: 2,000 characters, slow 
 speechma-ai-voice-generator/
 ├── core/                         # Core Python engine & modules
 │   ├── config.py                 # Auto-discovery configuration
-│   ├── engine.py                 # Speechma API client & parallel batch synthesis
+│   ├── engine.py                 # Speechma API client, auto-healing & parallel synthesis
+│   ├── proxy.py                  # Proxy manager, public proxy pool & IP rotation
 │   ├── solver.py                 # Pure Python 0.4ms bitwise OCR captcha solver
 │   └── voices.py                 # 583 voices catalog, filters & metadata loader
 ├── web/                          # Web Studio Application
